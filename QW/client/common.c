@@ -1678,11 +1678,9 @@ pack_t *COM_LoadPackFile (char *packfile) {
 
     fread(&header, 1, sizeof(header), packhandle);
     
-    if (header.id[0] != 'P' || header.id[1] != 'A' || header.id[2] != 'C' || header.id[3] != 'K') {
-
-               header.id[0], header.id[1], header.id[2], header.id[3]);
-        Sys_Error("%s is not a packfile", packfile);
-    }
+    if (header.id[0] != 'P' || header.id[1] != 'A'
+	|| header.id[2] != 'C' || header.id[3] != 'K')
+		Sys_Error ("%s is not a packfile", packfile);
 
 
     header.dirofs = LittleLong(header.dirofs);
