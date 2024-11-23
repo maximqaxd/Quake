@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // vid buffer
 
 #include "quakedef.h"
+#include <gl/glkos.h>
 
 extern unsigned char d_15to8table[65536];
 extern cvar_t crosshair, cl_crossx, cl_crossy, crosshaircolor;
@@ -78,21 +79,22 @@ typedef struct
 } gltexture_t;
 
 #define	MAX_GLTEXTURES	1024
+#ifdef __DREAMCAST__
+#define GL_COLOR_INDEX8_EXT 0x80E5
+#endif
 gltexture_t	gltextures[MAX_GLTEXTURES];
 int			numgltextures;
 
-void GL_Bind (int texnum)
-{
-	if (gl_nobind.value)
-		texnum = char_texture;
-	if (currenttexture == texnum)
-		return;
-	currenttexture = texnum;
-#ifdef _WIN32
-	bindTexFunc (GL_TEXTURE_2D, texnum);
-#else
-	glBindTexture (GL_TEXTURE_2D, texnum);
-#endif
+void GL_Bind(int texnum) {
+    if (gl_nobind.value) {
+        texnum = char_texture;
+    }
+    
+    if (currenttexture == texnum)
+        return;
+        
+    currenttexture = texnum;
+    glBindTexture(GL_TEXTURE_2D, gltextures[texnum].texnum);
 }
 
 
@@ -164,7 +166,11 @@ void Scrap_Upload (void)
 {
 	scrap_uploads++;
 	GL_Bind(scrap_texnum);
+#ifdef __DREAMCAST__
+	GL_Upload8(scrap_texels[0], BLOCK_WIDTH, BLOCK_HEIGHT, TEX_ALPHA);
+#else
 	GL_Upload8 (scrap_texels[0], BLOCK_WIDTH, BLOCK_HEIGHT, false, true);
+#endif
 	scrap_dirty = false;
 }
 
@@ -419,35 +425,35 @@ void Draw_Init (void)
 	for (x=0 ; x<strlen(ver) ; x++)
 		Draw_CharToConback (ver[x], dest+(x<<3));
 
-#if 0
-	conback->width = vid.conwidth;
-	conback->height = vid.conheight;
+#ifdef __DREAMCAST__
+  unsigned int y;
+  int f, fstep;
+  byte *src;
+  conback->width = vid.conwidth;
+  conback->height = vid.conheight;
 
-	// scale console to vid size
-	dest = ncdata = Hunk_AllocName(vid.conwidth * vid.conheight, "conback");
+  // scale console to vid size
+  dest = ncdata = Hunk_AllocName(vid.conwidth * vid.conheight, "conback");
 
-	for (y=0 ; y<vid.conheight ; y++, dest += vid.conwidth)
-	{
-		src = cb->data + cb->width * (y*cb->height/vid.conheight);
-		if (vid.conwidth == cb->width)
-			memcpy (dest, src, vid.conwidth);
-		else
-		{
-			f = 0;
-			fstep = cb->width*0x10000/vid.conwidth;
-			for (x=0 ; x<vid.conwidth ; x+=4)
-			{
-				dest[x] = src[f>>16];
-				f += fstep;
-				dest[x+1] = src[f>>16];
-				f += fstep;
-				dest[x+2] = src[f>>16];
-				f += fstep;
-				dest[x+3] = src[f>>16];
-				f += fstep;
-			}
-		}
-	}
+  for (y = 0; y < vid.conheight; y++, dest += vid.conwidth) {
+    src = cb->data + cb->width * (y * cb->height / vid.conheight);
+    if (vid.conwidth == (unsigned)cb->width)
+      memcpy(dest, src, vid.conwidth);
+    else {
+      f = 0;
+      fstep = cb->width * 0x10000 / vid.conwidth;
+      for (x = 0; x < vid.conwidth; x += 4) {
+        dest[x] = src[f >> 16];
+        f += fstep;
+        dest[x + 1] = src[f >> 16];
+        f += fstep;
+        dest[x + 2] = src[f >> 16];
+        f += fstep;
+        dest[x + 3] = src[f >> 16];
+        f += fstep;
+      }
+    }
+  }
 #else
 	conback->width = cb->width;
 	conback->height = cb->height;
@@ -930,6 +936,9 @@ void GL_Set2D (void)
 
 	glDisable (GL_DEPTH_TEST);
 	glDisable (GL_CULL_FACE);
+#ifdef __DREAMCAST__
+  glDisable(GL_NEARZ_CLIPPING_KOS);
+#endif
 	glDisable (GL_BLEND);
 	glEnable (GL_ALPHA_TEST);
 //	glDisable (GL_ALPHA_TEST);
@@ -1077,15 +1086,114 @@ void GL_MipMap8Bit (byte *in, int width, int height)
 		}
 }
 
+#ifndef __DREAMCAST__
+static unsigned int scaled[1024 * 512];  // [512*256];
+#else
+static unsigned char __attribute__((aligned(32)))  buffer_aligned[512 * 512 * 4];
+static unsigned char* scaled_raw = NULL;
+static unsigned char* scaled = NULL;
+#endif
+
 /*
 ===============
 GL_Upload32
 ===============
 */
+#ifdef __DREAMCAST__
+void GL_Upload32(unsigned *data, int width, int height, uint8_t flags) {
+#ifndef _arch_dreamcast
+  int samples;
+  int scaled_width, scaled_height;
+  qboolean alpha = ((flags & TEX_ALPHA) == TEX_ALPHA);
+  qboolean mipmap = ((flags & TEX_MIP) == TEX_MIP);
+
+  for (scaled_width = 1; scaled_width < width; scaled_width <<= 1)
+    ;
+  for (scaled_height = 1; scaled_height < height; scaled_height <<= 1)
+    ;
+
+  scaled_width >>= (int)gl_picmip.value;
+  scaled_height >>= (int)gl_picmip.value;
+
+  if (scaled_width > gl_max_size.value)
+    scaled_width = gl_max_size.value;
+  if (scaled_height > gl_max_size.value)
+    scaled_height = gl_max_size.value;
+
+  if (height < 8 || scaled_height < 8) {
+    scaled_height = 8;
+  }
+  if (width < 8 || scaled_width < 8) {
+    scaled_width = 8;
+  }
+
+  if (scaled_width * scaled_height > (int)sizeof(scaled) / 4)
+    Sys_Error("GL_LoadTexture: too big");
+
+  samples = alpha ? gl_alpha_format : gl_solid_format;
+
+#if 0
+	if (mipmap)
+		gluBuild2DMipmaps (GL_TEXTURE_2D, samples, width, height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	else if (scaled_width == width && scaled_height == height)
+		glTexImage2D (GL_TEXTURE_2D, 0, samples, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	else
+	{
+		gluScaleImage (GL_RGBA, width, height, GL_UNSIGNED_BYTE, data,	scaled_width, scaled_height, GL_UNSIGNED_BYTE, scaled);
+		glTexImage2D (GL_TEXTURE_2D, 0, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
+	}
+#else
+
+  if (scaled_width == width && scaled_height == height) {
+    if (!mipmap) {
+      glTexImage2D(GL_TEXTURE_2D, 0, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+      goto done;
+    }
+    memcpy(scaled, data, width * height * 4);
+  } else
+    GL_ResampleTexture(data, width, height, scaled, scaled_width, scaled_height);
+
+  glTexImage2D(GL_TEXTURE_2D, 0, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
+  if (mipmap) {
+    int miplevel;
+
+    miplevel = 0;
+    while (scaled_width > 1 || scaled_height > 1) {
+      GL_MipMap((byte *)scaled, scaled_width, scaled_height);
+      scaled_width >>= 1;
+      scaled_height >>= 1;
+      if (scaled_width < 1)
+        scaled_width = 1;
+      if (scaled_height < 1)
+        scaled_height = 1;
+      miplevel++;
+      glTexImage2D(GL_TEXTURE_2D, miplevel, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
+    }
+    GL_MipMap((byte *)scaled, 1, 1);
+    glTexImage2D(GL_TEXTURE_2D, miplevel, samples, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
+  }
+done:;
+#endif
+
+  if (mipmap) {
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_min);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+  } else {
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_max);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+  }
+#else
+  (void)data;
+  (void)width;
+  (void)height;
+  (void)flags;
+#endif
+}
+#else
 void GL_Upload32 (unsigned *data, int width, int height,  qboolean mipmap, qboolean alpha)
 {
 	int			samples;
-static	unsigned	scaled[1024*512];	// [512*256];
+	static	unsigned	scaled[1024*512];	// [512*256];
 	int			scaled_width, scaled_height;
 
 	for (scaled_width = 1 ; scaled_width < width ; scaled_width<<=1)
@@ -1166,7 +1274,100 @@ done: ;
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
 	}
 }
+#endif
+#ifdef __DREAMCAST__
+static void GL_Upload8_EXT(byte* restrict data, int width, int height,uint8_t flags) {
+#ifdef __DREAMCAST__  // BlackAura - begin
+  qboolean mipmap = ((flags & TEX_MIP) == TEX_MIP);
 
+  int scaled_width, scaled_height;
+  if (width != height) {
+    mipmap = false;
+  }
+
+  for (scaled_width = 1; scaled_width < width; scaled_width <<= 1)
+    ;
+  for (scaled_height = 1; scaled_height < height; scaled_height <<= 1)
+    ;
+
+  if (height < 8 || scaled_height < 8) {
+    scaled_height = 8;
+  }
+  if (width < 8 || scaled_width < 8) {
+    scaled_width = 8;
+  }
+
+  if (scaled_width > (int)gl_max_size.value)
+    scaled_width = gl_max_size.value;
+  if (scaled_height > (int)gl_max_size.value)
+    scaled_height = gl_max_size.value;
+
+  if(scaled_width == 256)
+    scaled_width >>= (int)gl_picmip.value;
+  if(scaled_height == 256)
+    scaled_height >>= (int)gl_picmip.value;
+
+#if  0/*def DEBUG*/
+  printf("GL_Upload8: %dx%d\t %d bytes\n", scaled_width, scaled_height, scaled_width*scaled_height);
+  printf("GL Mem left:%u\n", (unsigned int)glGetFreeVRAM_INTERNAL_KOS());
+#endif
+
+  if(!scaled){
+    scaled_raw = buffer_aligned; //Hunk_TempAlloc(256 * 256 + 32);
+    scaled = scaled_raw; //(unsigned char*)ALIGN((uint32_t)scaled_raw, 32);
+  }
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (mipmap) ? gl_filter_min:gl_filter_max);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
+  if ((scaled_width == width) && (scaled_height == height)) {
+    uint32_t ptr_unchecked = (uint32_t)data;
+    uint32_t ptr_aligned = ALIGN((uint32_t)data, 32);
+    if(ptr_unchecked != ptr_aligned){
+      memcpy(buffer_aligned, data,  scaled_width * scaled_height * 1);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_COLOR_INDEX8_EXT, scaled_width, scaled_height, 0, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, buffer_aligned);
+    } else {
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_COLOR_INDEX8_EXT, scaled_width, scaled_height, 0, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, data);
+    }
+    if (mipmap)
+      memcpy(scaled, data, width * height);
+    else {
+      return;
+    }
+  } else {
+    GL_Resample8BitTexture(data, width, height, scaled, scaled_width, scaled_height);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_COLOR_INDEX8_EXT, scaled_width, scaled_height, 0, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, scaled);
+  }
+
+  if ((scaled_width == scaled_height) && mipmap) {
+    //Only using scaled_width from now on;
+//#define PARANOID
+    int miplevel = 0;
+    #ifdef PARANOID
+    printf("Begin mip for %dx%d hopefully %d: ", scaled_width, scaled_height, log2(scaled_width));
+    #endif
+    while (scaled_width > 1) {
+      GL_MipMap8Bit(scaled, scaled_width, scaled_width);
+      scaled_width >>= 1;
+
+      glTexImage2D(GL_TEXTURE_2D, ++miplevel, GL_COLOR_INDEX8_EXT, scaled_width, scaled_width, 0, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, scaled);
+      #ifdef PARANOID
+      printf("..%d", miplevel);
+      #endif
+    }
+    #ifdef PARANOID
+    printf("\n");
+    #endif
+#undef PARANOID
+  }
+  return;
+#else
+  (void)data;
+  (void)width;
+  (void)height;
+  (void)flags;
+#endif  // BlackAura
+}
+#else
 void GL_Upload8_EXT (byte *data, int width, int height,  qboolean mipmap, qboolean alpha) 
 {
 	int			i, s;
@@ -1254,14 +1455,60 @@ done: ;
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
 	}
 }
-
+#endif
 extern qboolean VID_Is8bit();
 
+
+#ifdef __DREAMCAST__
 /*
 ===============
 GL_Upload8
 ===============
 */
+void GL_Upload8(byte *data, int width, int height, uint8_t flags) {
+// BlackAura - begin
+#ifdef _arch_dreamcast
+  /* Dreamcast is nice and simple - always use 8=bit textures */
+  GL_Upload8_EXT(data, width, height, flags);
+#else
+  /* PCs don't usually have 8-bit textures, so convert to 32-bit */
+  qboolean noalpha = true;
+  unsigned int *xlated;
+  unsigned int *ptr;
+  int n;
+
+  /* Work out size and allocate some memory for it */
+  // BlackAura - end
+  n = width * height;  // BlackAura - edited
+                       // BlackAura - begin
+  xlated = (unsigned int *)malloc(n * sizeof(int));
+  if (!xlated)
+    Sys_Error("GL_Upload8: Can't change texture format - out of memory");
+  ptr = xlated;
+
+  while (n) {
+    byte i = *data++;
+    // BlackAura - begin
+    if (i == 255)  // BlackAura - edited
+      noalpha = false;
+    // BlackAura - begin
+    *ptr++ = d_8to24table[i];
+    n--;
+  }
+
+  /* If we didn't find any transparent pixels, don't upload with an alpha channel */
+  if (noalpha)
+    flags = flags ^ TEX_ALPHA;
+
+  /* Upload texture, and free the memory we're eating up */
+  // BlackAura - end
+  GL_Upload32(xlated, width, height, flags);
+  // BlackAura - begin
+  free(xlated);
+#endif
+  // BlackAura - end
+}
+#else
 void GL_Upload8 (byte *data, int width, int height,  qboolean mipmap, qboolean alpha)
 {
 static	unsigned	trans[640*480];		// FIXME, temporary
@@ -1306,48 +1553,39 @@ static	unsigned	trans[640*480];		// FIXME, temporary
 
 	GL_Upload32 (trans, width, height, mipmap, alpha);
 }
+#endif
+int GL_LoadTexture (char *identifier, int width, int height, byte *data, qboolean mipmap, qboolean alpha) {
+    int i;
+    gltexture_t *glt;
+    GLuint texnum;
 
-/*
-================
-GL_LoadTexture
-================
-*/
-int GL_LoadTexture (char *identifier, int width, int height, byte *data, qboolean mipmap, qboolean alpha)
-{
-	int			i;
-	gltexture_t	*glt;
+    // Check for existing texture
+    if (identifier[0]) {
+        for (i=0, glt=gltextures ; i<numgltextures ; i++, glt++) {
+            if (!strcmp (identifier, glt->identifier)) {
+                return i;  // Return index for engine
+            }
+        }
+    }
 
-	// see if the texture is allready present
-	if (identifier[0])
-	{
-		for (i=0, glt=gltextures ; i<numgltextures ; i++, glt++)
-		{
-			if (!strcmp (identifier, glt->identifier))
-			{
-				if (width != glt->width || height != glt->height)
-					Sys_Error ("GL_LoadTexture: cache mismatch");
-				return gltextures[i].texnum;
-			}
-		}
-	}
-	else
-		glt = &gltextures[numgltextures];
-	numgltextures++;
+    // Generate GL texture handle
+    glGenTextures(1, &texnum);
+    glt = &gltextures[texture_extension_number];
+    
+    strcpy (glt->identifier, identifier);
+    glt->texnum = texnum;  // Store GL handle
+    glt->width = width;
+    glt->height = height;
+    glt->mipmap = mipmap;
 
-	strcpy (glt->identifier, identifier);
-	glt->texnum = texture_extension_number;
-	glt->width = width;
-	glt->height = height;
-	glt->mipmap = mipmap;
+    GL_Bind(texture_extension_number);  // Bind using engine index
+    GL_Upload8(data, width, height, TEX_NONE);
 
-	GL_Bind(texture_extension_number );
-
-	GL_Upload8 (data, width, height, mipmap, alpha);
-
-	texture_extension_number++;
-
-	return texture_extension_number-1;
+    numgltextures++;
+    texture_extension_number++;
+    return texture_extension_number-1;  // Return engine index
 }
+
 
 /*
 ================
@@ -1367,7 +1605,7 @@ void GL_SelectTexture (GLenum target)
 {
 	if (!gl_mtexable)
 		return;
-#ifndef __linux__ // no multitexture under Linux yet
+#if !defined(__DREAMCAST__) && !defined(__linux__) // no multitexture under Linux yet
 	qglSelectTextureSGIS(target);
 #endif
 	if (target == oldtarget) 

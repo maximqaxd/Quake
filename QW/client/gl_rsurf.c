@@ -27,6 +27,8 @@ int			skytexturenum;
 #define	GL_RGBA4	0
 #endif
 
+#include <gl/glext.h>
+#include <gl/glkos.h>
 
 int		lightmap_bytes;		// 1, 2, or 4
 
@@ -216,6 +218,47 @@ store:
 			}
 		}
 		break;
+	case GL_COLOR_INDEX8_EXT:{
+		/*
+		int bl_iter = 0;
+		const int _255 = 255;
+		*/
+		bl = blocklights;
+#if 0
+		int min = MIN(smax, tmax);
+		int mask = min - 1;
+		uint16_t* restrict vtex = (uint16_t*)dest;
+		int x,y;
+		for (y=0; y<tmax; y++) {
+			for (x=0; x<smax; x++) {
+				const int val1 = bl[bl_iter] >> 7;
+				const int val1_i = 255 - (val1 ^ ((_255 ^ val1) & -(_255 < val1))); // min(_255, val)
+				const int val2 = bl[bl_iter+smax] >> 7;
+				const int val2_i = 255 - (val2 ^ ((_255 ^ val2) & -(_255 < val2))); // min(_255, val)
+				bl_iter++;
+				vtex[TWIDOUT((y&mask)/2, x&mask) + (x/min + y/min)*min*min/2] = val1_i | (val2_i << 8);//pixels[y*w+x] | (pixels[(y+1)*w+x]<<8);
+			}
+		}
+#else
+		for (i=0 ; i<tmax ; i++, dest += stride)
+		{
+			for (j=0 ; j<smax ; j++)
+			{
+				/*
+				const int val = bl[bl_iter] >> 7;
+				const int val_i = 255 - (val ^ ((_255 ^ val) & -(_255 < val))); // min(_255, val)
+				dest[j] = val_i;
+				bl_iter++;*/
+				t = *bl++;
+				t >>= 7;
+				if (t > 255)
+					t = 255;
+				dest[j] = 255-t;
+			}
+		}
+		break;
+#endif
+	}	
 	default:
 		Sys_Error ("Bad lightmap format");
 	}
@@ -659,8 +702,6 @@ void DrawGLPoly (glpoly_t *p)
 	}
 	glEnd ();
 }
-
-
 /*
 ================
 R_BlendLightmaps
@@ -682,6 +723,7 @@ void R_BlendLightmaps (void)
 
 	glDepthMask (0);		// don't bother writing Z
 
+#ifndef __DREAMCAST__
 	if (gl_lightmap_format == GL_LUMINANCE)
 		glBlendFunc (GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
 	else if (gl_lightmap_format == GL_INTENSITY)
@@ -690,6 +732,7 @@ void R_BlendLightmaps (void)
 		glColor4f (0,0,0,1);
 		glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
+#endif
 
 	if (!r_lightmap.value)
 	{
@@ -716,9 +759,15 @@ void R_BlendLightmaps (void)
 //			glTexImage2D (GL_TEXTURE_2D, 0, lightmap_bytes
 //				, BLOCK_WIDTH, theRect->h, 0, 
 //				gl_lightmap_format, GL_UNSIGNED_BYTE, lightmaps+(i*BLOCK_HEIGHT+theRect->t)*BLOCK_WIDTH*lightmap_bytes);
-			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, theRect->t, 
-				BLOCK_WIDTH, theRect->h, gl_lightmap_format, GL_UNSIGNED_BYTE,
-				lightmaps+(i* BLOCK_HEIGHT + theRect->t) *BLOCK_WIDTH*lightmap_bytes);
+#ifdef __DREAMCAST__
+				glTexImage2D (GL_TEXTURE_2D, 0, GL_COLOR_INDEX8_EXT
+				, BLOCK_WIDTH, theRect->h, 0,
+				GL_COLOR_INDEX, GL_UNSIGNED_BYTE, lightmaps+(i*BLOCK_HEIGHT+theRect->t)*BLOCK_WIDTH*lightmap_bytes);
+			#else
+				glTexImage2D (GL_TEXTURE_2D, 0, lightmap_bytes
+					, BLOCK_WIDTH, theRect->h, 0,
+					gl_lightmap_format, GL_UNSIGNED_BYTE, lightmaps+(i*BLOCK_HEIGHT+theRect->t)*BLOCK_WIDTH*lightmap_bytes);
+			#endif
 			theRect->l = BLOCK_WIDTH;
 			theRect->t = BLOCK_HEIGHT;
 			theRect->h = 0;
@@ -747,6 +796,7 @@ void R_BlendLightmaps (void)
 	}
 
 	glDisable (GL_BLEND);
+#ifndef __DREAMCAST__
 	if (gl_lightmap_format == GL_LUMINANCE)
 		glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	else if (gl_lightmap_format == GL_INTENSITY)
@@ -754,7 +804,7 @@ void R_BlendLightmaps (void)
 		glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 		glColor4f (1,1,1,1);
 	}
-
+#endif
 	glDepthMask (1);		// back to normal Z buffering
 }
 
@@ -1618,6 +1668,10 @@ void GL_BuildLightmaps (void)
 		texture_extension_number += MAX_LIGHTMAPS;
 	}
 
+#ifdef __DREAMCAST__
+		gl_lightmap_format = GL_COLOR_INDEX8_EXT;
+		lightmap_bytes = 1;
+#else
 	gl_lightmap_format = GL_LUMINANCE;
 	if (COM_CheckParm ("-lm_1"))
 		gl_lightmap_format = GL_LUMINANCE;
@@ -1644,7 +1698,7 @@ void GL_BuildLightmaps (void)
 		lightmap_bytes = 1;
 		break;
 	}
-
+#endif
 	for (j=1 ; j<MAX_MODELS ; j++)
 	{
 		m = cl.model_precache[j];
@@ -1685,9 +1739,20 @@ void GL_BuildLightmaps (void)
 		GL_Bind(lightmap_textures + i);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+#ifdef __DREAMCAST__
+		glTexParameteri(GL_TEXTURE_2D, GL_SHARED_TEXTURE_BANK_KOS, 1);
+
+		glTexImage2D (GL_TEXTURE_2D, 0, GL_COLOR_INDEX8_EXT
+		, BLOCK_WIDTH, BLOCK_HEIGHT, 0,
+		GL_COLOR_INDEX, GL_UNSIGNED_BYTE, lightmaps+i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+		//glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		//glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+		#else
 		glTexImage2D (GL_TEXTURE_2D, 0, lightmap_bytes
-		, BLOCK_WIDTH, BLOCK_HEIGHT, 0, 
+		, BLOCK_WIDTH, BLOCK_HEIGHT, 0,
 		gl_lightmap_format, GL_UNSIGNED_BYTE, lightmaps+i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+#endif
 	}
 
  	if (!gl_texsort.value)

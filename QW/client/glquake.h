@@ -54,9 +54,15 @@ extern	int		texture_mode;
 
 extern	float	gldepthmin, gldepthmax;
 
+#ifdef __DREAMCAST__
+void GL_Upload32(unsigned *data, int width, int height, uint8_t flags);
+static void GL_Upload8_EXT(byte* restrict data, int width, int height,uint8_t flags);
+void GL_Upload8(byte *data, int width, int height, uint8_t flags);
+#else
 void GL_Upload32 (unsigned *data, int width, int height,  qboolean mipmap, qboolean alpha);
-void GL_Upload8 (byte *data, int width, int height,  qboolean mipmap, qboolean alpha);
 void GL_Upload8_EXT (byte *data, int width, int height,  qboolean mipmap, qboolean alpha);
+void GL_Upload8 (byte *data, int width, int height,  qboolean mipmap, qboolean alpha);
+#endif
 int GL_LoadTexture (char *identifier, int width, int height, byte *data, qboolean mipmap, qboolean alpha);
 int GL_FindTexture (char *identifier);
 
@@ -92,6 +98,12 @@ extern	PROC glVertexPointerEXT;
 #define SKYMASK			(SKYSIZE - 1)
 
 #define BACKFACE_EPSILON	0.01
+
+#define TEX_NONE					0
+#define TEX_MIP						2
+#define TEX_ALPHA					4
+#define	TEX_WORLD					8 //R00k
+
 
 
 void R_TimeRefresh_f (void);

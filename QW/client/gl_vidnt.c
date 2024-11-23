@@ -67,8 +67,9 @@ const char *gl_version;
 const char *gl_extensions;
 
 qboolean		DDActive;
+#if 0
 qboolean		scr_skipupdate;
-
+#endif
 static vmode_t	modelist[MAX_MODE_LIST];
 static int		nummodes;
 static vmode_t	*pcurrentmode;

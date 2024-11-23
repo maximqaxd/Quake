@@ -21,7 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 cvar_t		baseskin = {"baseskin", "base"};
-cvar_t		noskins = {"noskins", "0"};
+cvar_t		noskins = {"noskins", "1"};
 
 char		allskins[128];
 #define	MAX_CACHED_SKINS		128

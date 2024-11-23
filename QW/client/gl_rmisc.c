@@ -353,8 +353,11 @@ void R_TranslatePlayerSkin (int playernum)
 					frac += fracstep;
 				}
 			}
-
+#ifdef __DREAMCAST__
+			GL_Upload8((byte *)pixels, scaled_width, scaled_height, TEX_NONE);
+#else
 			GL_Upload8_EXT ((byte *)pixels, scaled_width, scaled_height, false, false);
+#endif
 			return;
 		}
 

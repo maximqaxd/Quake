@@ -30,7 +30,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <sys/uio.h>
 #include <arpa/inet.h>
 #include <errno.h>
-
+#ifdef __DREAMCAST__
+#include <kos/net.h>
+#define MAXHOSTNAMELEN 256
+#endif
 #if defined(sun)
 #include <unistd.h>
 #endif
@@ -53,7 +56,9 @@ int			net_send_socket;	// blocking, for sends
 #define	MAX_UDP_PACKET	8192
 byte		net_message_buffer[MAX_UDP_PACKET];
 
+#ifndef __DREAMCAST__
 int gethostname (char *, int);
+#endif
 int close (int);
 
 //=============================================================================
@@ -241,7 +246,11 @@ int UDP_OpenSocket (int port)
 
 	if ((newsocket = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
 		Sys_Error ("UDP_OpenSocket: socket:", strerror(errno));
-	if (ioctl (newsocket, FIONBIO, (char *)&_true) == -1)
+#ifdef __DREAMCAST__
+	if( fcntl( newsocket, F_SETFL, O_NONBLOCK ) == -1)
+#else
+	if (ioctlsocket (newsocket, FIONBIO, &_true) == -1)
+#endif
 		Sys_Error ("UDP_OpenSocket: ioctl FIONBIO:", strerror(errno));
 	address.sin_family = AF_INET;
 //ZOID -- check for interface binding option
@@ -266,10 +275,14 @@ void NET_GetLocalAddress (void)
 	char	buff[MAXHOSTNAMELEN];
 	struct sockaddr_in	address;
 	int		namelen;
-
+#if __DREAMCAST__
+	net_ipv4_get_stats();
+	inet_ntop(AF_INET, &net_default_dev->ip_addr[0], buff,
+                  INET_ADDRSTRLEN);		  
+#else
 	gethostname(buff, MAXHOSTNAMELEN);
 	buff[MAXHOSTNAMELEN-1] = 0;
-
+#endif
 	NET_StringToAdr (buff, &net_local_adr);
 
 	namelen = sizeof(address);
@@ -290,6 +303,14 @@ void NET_Init (int port)
 	//
 	// open the single socket to be used for all communications
 	//
+#ifdef __DREAMCAST__
+	bba_init();
+	if (net_init(net_default_dev))
+	{
+		printf( "network initialization failed.\n" );
+		return;
+	}
+#endif
 	net_socket = UDP_OpenSocket (port);
 
 	//

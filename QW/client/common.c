@@ -1190,43 +1190,47 @@ void COM_AddParm (char *parm)
 }
 
 
-/*
-================
-COM_Init
-================
-*/
-void COM_Init (void)
-{
-	byte	swaptest[2] = {1,0};
+void COM_Init (void) {
+    printf("COM_Init: Starting\n");
+    
+    byte swaptest[2] = {1,0};
+    printf("COM_Init: Checking endianness\n");
 
-// set the byte swapping variables in a portable manner	
-	if ( *(short *)swaptest == 1)
-	{
-		bigendien = false;
-		BigShort = ShortSwap;
-		LittleShort = ShortNoSwap;
-		BigLong = LongSwap;
-		LittleLong = LongNoSwap;
-		BigFloat = FloatSwap;
-		LittleFloat = FloatNoSwap;
-	}
-	else
-	{
-		bigendien = true;
-		BigShort = ShortNoSwap;
-		LittleShort = ShortSwap;
-		BigLong = LongNoSwap;
-		LittleLong = LongSwap;
-		BigFloat = FloatNoSwap;
-		LittleFloat = FloatSwap;
-	}
+    if ( *(short *)swaptest == 1) {
+        printf("COM_Init: Little endian detected\n");
+        bigendien = false;
+        BigShort = ShortSwap;
+        LittleShort = ShortNoSwap;
+        BigLong = LongSwap;
+        LittleLong = LongNoSwap;
+        BigFloat = FloatSwap;
+        LittleFloat = FloatNoSwap;
+    } else {
+        printf("COM_Init: Big endian detected\n");
+        bigendien = true;
+        BigShort = ShortNoSwap;
+        LittleShort = ShortSwap;
+        BigLong = LongNoSwap;
+        LittleLong = LongSwap;
+        BigFloat = FloatNoSwap;
+        LittleFloat = FloatSwap;
+    }
 
-	Cvar_RegisterVariable (&registered);
-	Cmd_AddCommand ("path", COM_Path_f);
+    printf("COM_Init: Registering variables\n");
+    Cvar_RegisterVariable (&registered);
+    
+    printf("COM_Init: Adding commands\n");
+    Cmd_AddCommand ("path", COM_Path_f);
 
-	COM_InitFilesystem ();
-	COM_CheckRegistered ();
+    printf("COM_Init: Initializing filesystem\n");
+    COM_InitFilesystem ();
+    
+    printf("COM_Init: Checking registration\n");
+    COM_CheckRegistered ();
+    
+    printf("COM_Init: Complete\n");
 }
+
 
 
 /*
@@ -1340,19 +1344,23 @@ int COM_filelength (FILE *f)
 	return end;
 }
 
-int COM_FileOpenRead (char *path, FILE **hndl)
-{
-	FILE	*f;
+int COM_FileOpenRead (char *path, FILE **hndl) {
+    printf("COM_FileOpenRead: Attempting to open %s\n", path);
+    FILE *f;
 
-	f = fopen(path, "rb");
-	if (!f)
-	{
-		*hndl = NULL;
-		return -1;
-	}
-	*hndl = f;
-	
-	return COM_filelength(f);
+    f = fopen(path, "rb");
+    if (!f) {
+        printf("COM_FileOpenRead: Failed to open file\n");
+        *hndl = NULL;
+        return -1;
+    }
+    
+    printf("COM_FileOpenRead: File opened successfully\n");
+    *hndl = f;
+    
+    int length = COM_filelength(f);
+    printf("COM_FileOpenRead: File length: %d\n", length);
+    return length;
 }
 
 /*
@@ -1637,65 +1645,105 @@ Loads the header and directory, adding the files at the beginning
 of the list so they override previous pack files.
 =================
 */
-pack_t *COM_LoadPackFile (char *packfile)
-{
-	dpackheader_t	header;
-	int				i;
-	packfile_t		*newfiles;
-	int				numpackfiles;
-	pack_t			*pack;
-	FILE			*packhandle;
-	dpackfile_t		info[MAX_FILES_IN_PACK];
-	unsigned short		crc;
+pack_t *COM_LoadPackFile (char *packfile) {
 
-	if (COM_FileOpenRead (packfile, &packhandle) == -1)
+    dpackheader_t header;
+    int i;
+    packfile_t *newfiles;
+    int numpackfiles;
+    pack_t *pack;
+    FILE *packhandle;
+#ifdef __DREAMCAST__
+	dpackfile_t *info;  
+#else
+    dpackfile_t info[MAX_FILES_IN_PACK];
+#endif
+    unsigned short crc;
+
+
+
+#ifdef __DREAMCAST__
+	  info = malloc(sizeof(dpackfile_t) * MAX_FILES_IN_PACK);  // Allocate on heap
+    
+    if (COM_FileOpenRead (packfile, &packhandle) == -1) {
+        free(info);  
+        return NULL;
+    }
+#else
+    if (COM_FileOpenRead (packfile, &packhandle) == -1) {
+        printf("COM_LoadPackFile: File not found\n");
+        return NULL;
+    }
+#endif
+
+    fread(&header, 1, sizeof(header), packhandle);
+    
+    if (header.id[0] != 'P' || header.id[1] != 'A' || header.id[2] != 'C' || header.id[3] != 'K') {
+
+               header.id[0], header.id[1], header.id[2], header.id[3]);
+        Sys_Error("%s is not a packfile", packfile);
+    }
+
+
+    header.dirofs = LittleLong(header.dirofs);
+    header.dirlen = LittleLong(header.dirlen);
+    printf("COM_LoadPackFile: Directory offset: %d, length: %d\n", header.dirofs, header.dirlen);
+
+    numpackfiles = header.dirlen / sizeof(dpackfile_t);
+    printf("COM_LoadPackFile: Contains %d files\n", numpackfiles);
+
+    if (numpackfiles > MAX_FILES_IN_PACK) {
+        printf("COM_LoadPackFile: Too many files (%d)\n", numpackfiles);
+        Sys_Error("%s has %i files", packfile, numpackfiles);
+    }
+
+    if (numpackfiles != PAK0_COUNT) {
+        printf("COM_LoadPackFile: Modified PAK detected\n");
+        com_modified = true;
+    }
+
+    printf("COM_LoadPackFile: Allocating file table\n");
+    newfiles = Z_Malloc(numpackfiles * sizeof(packfile_t));
+
+   printf("COM_LoadPackFile: Reading directory at offset %d\n", header.dirofs);
+	if (fseek(packhandle, header.dirofs, SEEK_SET) != 0) {
+		printf("COM_LoadPackFile: Seek failed\n");
 		return NULL;
-
-	fread (&header, 1, sizeof(header), packhandle);
-	if (header.id[0] != 'P' || header.id[1] != 'A'
-	|| header.id[2] != 'C' || header.id[3] != 'K')
-		Sys_Error ("%s is not a packfile", packfile);
-	header.dirofs = LittleLong (header.dirofs);
-	header.dirlen = LittleLong (header.dirlen);
-
-	numpackfiles = header.dirlen / sizeof(dpackfile_t);
-
-	if (numpackfiles > MAX_FILES_IN_PACK)
-		Sys_Error ("%s has %i files", packfile, numpackfiles);
-
-	if (numpackfiles != PAK0_COUNT)
-		com_modified = true;	// not the original file
-
-	newfiles = Z_Malloc (numpackfiles * sizeof(packfile_t));
-
-	fseek (packhandle, header.dirofs, SEEK_SET);
-	fread (&info, 1, header.dirlen, packhandle);
-
-// crc the directory to check for modifications
-	crc = CRC_Block((byte *)info, header.dirlen);
-
-//	CRC_Init (&crc);
-//	for (i=0 ; i<header.dirlen ; i++)
-//		CRC_ProcessByte (&crc, ((byte *)info)[i]);
-	if (crc != PAK0_CRC)
-		com_modified = true;
-
-// parse the directory
-	for (i=0 ; i<numpackfiles ; i++)
-	{
-		strcpy (newfiles[i].name, info[i].name);
-		newfiles[i].filepos = LittleLong(info[i].filepos);
-		newfiles[i].filelen = LittleLong(info[i].filelen);
 	}
 
-	pack = Z_Malloc (sizeof (pack_t));
-	strcpy (pack->filename, packfile);
-	pack->handle = packhandle;
-	pack->numfiles = numpackfiles;
-	pack->files = newfiles;
-	
-	Con_Printf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
-	return pack;
+	size_t bytes_read = fread(info, 1, header.dirlen, packhandle);
+	printf("COM_LoadPackFile: Read %d bytes of directory\n", bytes_read);
+
+	if (bytes_read != header.dirlen) {
+		printf("COM_LoadPackFile: Directory read incomplete\n");
+		return NULL;
+	}
+
+    printf("COM_LoadPackFile: Calculating CRC\n");
+    crc = CRC_Block((byte *)info, header.dirlen);
+
+    if (crc != PAK0_CRC) {
+        printf("COM_LoadPackFile: CRC mismatch - modified PAK\n");
+        com_modified = true;
+    }
+
+    printf("COM_LoadPackFile: Parsing directory entries\n");
+    for (i = 0; i < numpackfiles; i++) {
+        strcpy(newfiles[i].name, info[i].name);
+        newfiles[i].filepos = LittleLong(info[i].filepos);
+        newfiles[i].filelen = LittleLong(info[i].filelen);
+    }
+
+    printf("COM_LoadPackFile: Creating pack structure\n");
+    pack = Z_Malloc(sizeof(pack_t));
+    strcpy(pack->filename, packfile);
+    pack->handle = packhandle;
+    pack->numfiles = numpackfiles;
+    pack->files = newfiles;
+
+    Con_Printf("Added packfile %s (%i files)\n", packfile, numpackfiles);
+    printf("COM_LoadPackFile: Successfully loaded pack\n");
+    return pack;
 }
 
 
@@ -1707,44 +1755,49 @@ Sets com_gamedir, adds the directory to the head of the path,
 then loads and adds pak1.pak pak2.pak ... 
 ================
 */
-void COM_AddGameDirectory (char *dir)
-{
-	int				i;
-	searchpath_t	*search;
-	pack_t			*pak;
-	char			pakfile[MAX_OSPATH];
-	char			*p;
+void COM_AddGameDirectory (char *dir) {
+    printf("COM_AddGameDirectory: Starting with dir: %s\n", dir);
+    
+    int i;
+    searchpath_t *search;
+    pack_t *pak;
+    char pakfile[MAX_OSPATH];
+    char *p;
 
-	if ((p = strrchr(dir, '/')) != NULL)
-		strcpy(gamedirfile, ++p);
-	else
-		strcpy(gamedirfile, p);
-	strcpy (com_gamedir, dir);
+    if ((p = strrchr(dir, '/')) != NULL) {
+        strcpy(gamedirfile, ++p);
+        printf("COM_AddGameDirectory: Found game dir: %s\n", gamedirfile);
+    } else {
+        strcpy(gamedirfile, p);
+        printf("COM_AddGameDirectory: No game dir found\n");
+    }
+    
+    strcpy(com_gamedir, dir);
+    printf("COM_AddGameDirectory: Set com_gamedir: %s\n", com_gamedir);
 
-//
-// add the directory to the search path
-//
-	search = Hunk_Alloc (sizeof(searchpath_t));
-	strcpy (search->filename, dir);
-	search->next = com_searchpaths;
-	com_searchpaths = search;
+    search = Hunk_Alloc(sizeof(searchpath_t));
+    printf("COM_AddGameDirectory: Allocated searchpath\n");
+    
+    strcpy(search->filename, dir);
+    search->next = com_searchpaths;
+    com_searchpaths = search;
+    printf("COM_AddGameDirectory: Added directory to search path\n");
 
-//
-// add any pak files in the format pak0.pak pak1.pak, ...
-//
-	for (i=0 ; ; i++)
-	{
-		sprintf (pakfile, "%s/pak%i.pak", dir, i);
-		pak = COM_LoadPackFile (pakfile);
-		if (!pak)
-			break;
-		search = Hunk_Alloc (sizeof(searchpath_t));
-		search->pack = pak;
-		search->next = com_searchpaths;
-		com_searchpaths = search;		
-	}
-
+    for (i=0; ; i++) {
+        sprintf(pakfile, "%s/pak%i.pak", dir, i);
+        printf("COM_AddGameDirectory: Checking for pak file: %s\n", pakfile);
+        pak = COM_LoadPackFile(pakfile);
+        if (!pak)
+            break;
+        printf("COM_AddGameDirectory: Found pak%i.pak\n", i);
+        search = Hunk_Alloc(sizeof(searchpath_t));
+        search->pack = pak;
+        search->next = com_searchpaths;
+        com_searchpaths = search;
+    }
+    printf("COM_AddGameDirectory: Complete\n");
 }
+
 
 /*
 ================
@@ -1826,29 +1879,31 @@ void COM_Gamedir (char *dir)
 COM_InitFilesystem
 ================
 */
-void COM_InitFilesystem (void)
-{
-	int		i;
+void COM_InitFilesystem (void) {
+    int i;
+    printf("COM_InitFilesystem: Starting\n");
 
-//
-// -basedir <path>
-// Overrides the system supplied base directory (under id1)
-//
-	i = COM_CheckParm ("-basedir");
-	if (i && i < com_argc-1)
-		strcpy (com_basedir, com_argv[i+1]);
-	else
-		strcpy (com_basedir, host_parms.basedir);
+    i = COM_CheckParm ("-basedir");
+    printf("COM_InitFilesystem: Checking basedir param: %d\n", i);
 
-//
-// start up with id1 by default
-//
-	COM_AddGameDirectory (va("%s/id1", com_basedir) );
-	COM_AddGameDirectory (va("%s/qw", com_basedir) );
+    if (i && i < com_argc-1) {
+        strcpy (com_basedir, com_argv[i+1]);
+        printf("COM_InitFilesystem: Using command line basedir: %s\n", com_basedir);
+    } else {
+        strcpy (com_basedir, host_parms.basedir);
+        printf("COM_InitFilesystem: Using default basedir: %s\n", com_basedir);
+    }
 
-	// any set gamedirs will be freed up to here
-	com_base_searchpaths = com_searchpaths;
+    printf("COM_InitFilesystem: Adding id1 directory\n");
+    COM_AddGameDirectory (va("%s/id1", com_basedir));
+    
+    printf("COM_InitFilesystem: Adding qw directory\n");
+    COM_AddGameDirectory (va("%s/qw", com_basedir));
+
+    com_base_searchpaths = com_searchpaths;
+    printf("COM_InitFilesystem: Complete\n");
 }
+
 
 
 

@@ -27,6 +27,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <netinet/in.h>
 #endif
 
+#if __DREAMCAST__
+#define INADDR_LOOPBACK 0x7f000001
+#endif
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -1431,63 +1434,82 @@ void Host_Init (quakeparms_t *parms)
 		Sys_Error ("Only %4.1f megs of memory reported, can't execute game", parms->memsize / (float)0x100000);
 
 	Memory_Init (parms->membase, parms->memsize);
+	printf("Memory_Init done\n");
+
 	Cbuf_Init ();
+	printf("Cbuf_Init done\n");
+
 	Cmd_Init ();
+	printf("Cmd_Init done\n");
+
 	V_Init ();
+	printf("V_Init done\n");
 
 	COM_Init ();
+	printf("COM_Init done\n");
 
 	Host_FixupModelNames();
-	
+	printf("Host_FixupModelNames done\n");
+
 	NET_Init (PORT_CLIENT);
+	printf("NET_Init done\n");
+
 	Netchan_Init ();
+	printf("Netchan_Init done\n");
 
 	W_LoadWadFile ("gfx.wad");
+	printf("W_LoadWadFile done\n");
+
 	Key_Init ();
-	Con_Init ();	
-	M_Init ();	
+	printf("Key_Init done\n");
+
+	Con_Init ();    
+	printf("Con_Init done\n");
+
+	M_Init ();  
+	printf("M_Init done\n");
+
 	Mod_Init ();
-	
-//	Con_Printf ("Exe: "__TIME__" "__DATE__"\n");
-	Con_Printf ("%4.1f megs RAM used.\n",parms->memsize/ (1024*1024.0));
-	
+	printf("Mod_Init done\n");
+
 	R_InitTextures ();
- 
+	printf("R_InitTextures done\n");
+
 	host_basepal = (byte *)COM_LoadHunkFile ("gfx/palette.lmp");
-	if (!host_basepal)
-		Sys_Error ("Couldn't load gfx/palette.lmp");
+	printf("Palette loaded\n");
+
 	host_colormap = (byte *)COM_LoadHunkFile ("gfx/colormap.lmp");
-	if (!host_colormap)
-		Sys_Error ("Couldn't load gfx/colormap.lmp");
-#ifdef __linux__
-	IN_Init ();
-	CDAudio_Init ();
-	VID_Init (host_basepal);
-	Draw_Init ();
-	SCR_Init ();
-	R_Init ();
+	printf("Colormap loaded\n");
 
-//	S_Init ();		// S_Init is now done as part of VID. Sigh.
-	
-	cls.state = ca_disconnected;
-	Sbar_Init ();
-	CL_Init ();
-#else
 	VID_Init (host_basepal);
+	printf("VID_Init done\n");
+
 	Draw_Init ();
+	printf("Draw_Init done\n");
+
 	SCR_Init ();
+	printf("SCR_Init done\n");
+
 	R_Init ();
-//	S_Init ();		// S_Init is now done as part of VID. Sigh.
-#ifdef GLQUAKE
+	printf("R_Init done\n");
+
 	S_Init();
-#endif
+	printf("S_Init done\n");
 
 	cls.state = ca_disconnected;
+	printf("State set\n");
+
 	CDAudio_Init ();
+	printf("CDAudio_Init done\n");
+
 	Sbar_Init ();
+	printf("Sbar_Init done\n");
+
 	CL_Init ();
+	printf("CL_Init done\n");
+
 	IN_Init ();
-#endif
+printf("IN_Init done\n");
 
 	Cbuf_InsertText ("exec quake.rc\n");
 	Cbuf_AddText ("echo Type connect <internet address> or use GameSpy to connect to a game.\n");
@@ -1500,7 +1522,7 @@ void Host_Init (quakeparms_t *parms)
 
 	Con_Printf ("\nClient Version %4.2f (Build %04d)\n\n", VERSION, build_number());
 
-	Con_Printf ("ÄÅÅÅÅÅÅ QuakeWorld Initialized ÅÅÅÅÅÅÇ\n");	
+	Con_Printf ("ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ QuakeWorld Initialized ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ\n");	
 }
 
 
